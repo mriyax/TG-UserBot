@@ -32,9 +32,14 @@ conversation_args = {
     'timeout': 10,
     'exclusive': True
 }
+
 NO_PACK = """`Couldn't find {} in your sticker packs! \
 Check your packs and update it in the config or use \
 {}kang {}:<pack title> {} to make a new pack.`"""
+
+FALSE_DEFAULT = """`Couldn't find {} in your \
+packs! Check your packs and update it in the config \
+or use {}stickerpack reset for deafult packs.`"""
 
 
 @client.onMessage(
@@ -89,12 +94,13 @@ async def stickerpack(event):
         await event.edit(await _set_default_packs(match, ':'))
     elif '=' in match:
         await event.edit(await _set_default_packs(match, '='))
+    elif match.strip().lower() == "reset":
+        await _set_default_packs("basic=reset", '=')
+        await _set_default_packs("animated=reset", '=')
+        await event.edit("`Successfully reset both of your packs.`")
     else:
-        client.config['userbot']['default_sticker_pack'] = match
-        text = f"`Successfully changed your default pack to {match}!`"
-        await event.edit(text)
-
-    client._updateconfig()
+        match = f"basic:{match}"
+        await event.edit(await _set_default_packs(match, ':'))
 
 
 @client.onMessage(
@@ -130,6 +136,7 @@ async def kang(event):
     pack, emojis, name, is_animated = await _resolve_messages(
         event, sticker_event
     )
+    prefix = client.prefix if client.prefix is not None else '.'
     if pack:
         if (':' in pack) or ('=' in pack):
             text = event.matches[0].group(1)
@@ -140,7 +147,7 @@ async def kang(event):
             if not pack and not packnick:
                 await event.edit(
                     "`Are you sure you're using the correct syntax?`\n"
-                    f"`{client.prefix}kang <packName>=<packsShortName>`\n"
+                    f"`{prefix}kang <packName>=<packsShortName>`\n"
                     "`You can also choose emojis whilst making a new pack.`"
                 )
                 return
@@ -162,11 +169,13 @@ async def kang(event):
         else:
             packs, first_msg = await _list_packs()
             is_pack = await _verify_cs_name(pack, packs)
-            if not is_pack:
+            if "_kang_pack" in pack:
+                new_pack = True
+            elif not is_pack:
                 await event.edit(
                     NO_PACK.format(
                         pack,
-                        client.prefix,
+                        prefix,
                         pack or "<pack username>",
                         emojis or default_emoji
                     )
@@ -190,9 +199,7 @@ async def kang(event):
                     packnick = f"{tag}'s animated kang pack"
                 else:
                     pack = animated or "a default animated pack"
-                    await event.edit(
-                        f"`Couldn't find {pack} in your animated packs!`"
-                    )
+                    await event.edit(FALSE_DEFAULT.format(pack, prefix))
                     await _delete_sticker_messages(first_msg)
                     return
         else:
@@ -207,10 +214,7 @@ async def kang(event):
                     packnick = f"{tag}'s kang pack"
                 else:
                     pack = basic or "a default pack"
-                    await event.edit(
-                        f"`Couldn't find {pack} in your "
-                        "packs! Check your packs and update it in the config.`"
-                    )
+                    await event.edit(FALSE_DEFAULT.format(pack, prefix))
                     await _delete_sticker_messages(first_msg)
                     return
 
@@ -351,7 +355,7 @@ async def _set_default_packs(string: str, delimiter: str) -> str:
                 text = f"`Successfully reset your default animated pack!`"
                 del client.config['userbot']['default_animated_sticker_pack']
             else:
-                text = "`You had no default animated pack. to reset!`"
+                text = "`You had no default animated pack to reset!`"
         else:
             client.config['userbot']['default_animated_sticker_pack'] = name
             text = (
@@ -366,7 +370,7 @@ async def _set_default_packs(string: str, delimiter: str) -> str:
                 text = f"`Successfully reset your default pack!`"
                 del client.config['userbot']['default_sticker_pack']
             else:
-                text = "`You had no default animated pack. to reset!`"
+                text = "`You had no default pack to reset!`"
         else:
             client.config['userbot']['default_sticker_pack'] = name
             text = f"`Successfully changed your default pack to {name}!`"
@@ -529,17 +533,15 @@ async def _extract_pack_name(string):
 
 async def _resolve_messages(event, sticker_event):
     sticker_name = "sticker.png"
-    text = event.matches[0].group(1)
+    text = event.matches[0].group(1).strip()
     is_animated = False
     attribute_emoji = None
 
     if sticker_event.sticker:
         document = sticker_event.media.document
-        attribute_emoji = (
-            attribute.alt
-            for attribute in document.attributes
-            if isinstance(attribute, DocumentAttributeSticker)
-        )
+        for attribute in document.attributes:
+            if isinstance(attribute, DocumentAttributeSticker):
+                attribute_emoji = attribute.alt
         if document.mime_type == "application/x-tgsticker":
             sticker_name = 'AnimatedSticker.tgs'
             is_animated = True
@@ -550,15 +552,16 @@ async def _resolve_messages(event, sticker_event):
     if pack_in_text:
         pack = pack_in_text
     else:
-        basic, animated = await _get_default_packs()
+        pack = None
+        """basic, animated = await _get_default_packs()
         if is_animated:
             pack = animated
         else:
-            pack = basic
+            pack = basic"""
 
     emojis = emojis_in_text or attribute_emoji or default_emoji
 
-    return (pack, emojis, sticker_name, is_animated)
+    return pack, emojis, sticker_name, is_animated
 
 
 async def _get_default_packs():
@@ -568,6 +571,14 @@ async def _get_default_packs():
     config = client.config['userbot']
     basic = config.get('default_sticker_pack', basic_default)
     animated = config.get('default_animated_sticker_pack', animated_default)
+
+    if basic.strip().lower() == "auto" or basic.strip().lower() == "none":
+        basic = basic_default
+    if (
+        animated.strip().lower() == "auto" or
+        animated.strip().lower() == "none"
+    ):
+        animated = animated_default
 
     return basic, animated
 
