@@ -32,7 +32,7 @@ async def get_user_from_msg(event: Message) -> Union[int, str, None]:
     match = event.matches[0].group(1)
 
     if match == "this":
-        match = event.chat_id
+        match = str(event.chat.id)
 
     if event.entities:
         for entity in event.entities:
@@ -63,9 +63,10 @@ async def get_entity_from_msg(event: Message) -> Union[int, str, None]:
     extra = pattern.match(match).group(2)
     reply = await event.get_reply_message()
 
-    if reply and user:
-        extra = user + extra
+    if reply:
         user = str(reply.from_id)
+        if extra:
+            extra = user + extra
 
     user = int(user) if user.isdigit() else str(user)
 
