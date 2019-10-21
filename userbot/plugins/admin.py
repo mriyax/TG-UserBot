@@ -55,11 +55,7 @@ async def promote(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to promote. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -96,11 +92,7 @@ async def demote(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to demote. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -135,11 +127,7 @@ async def ban(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to ban. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -181,11 +169,7 @@ async def unban(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to un-ban. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -219,11 +203,7 @@ async def kick(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to kick. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -258,11 +238,7 @@ async def mute(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to mute. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -297,11 +273,7 @@ async def unmute(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to un-mute. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -351,11 +323,7 @@ async def tmute(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to t-mute. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)
 
 
@@ -404,9 +372,5 @@ async def tban(event):
             text.format(get_display_name(user), user.id)
         )
     except Exception as e:
-        await event.edit(
-            "`An exception occured trying to t-ban. "
-            " Make sure you have the correct rights! "
-            "Check the logs for more information.`"
-        )
+        await event.edit(f"`{e}`")
         LOGGER.exception(e)

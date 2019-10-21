@@ -102,7 +102,7 @@ class UserBotClient(TelegramClient):
         self.disabled_commands.clear()
         await self.disconnect()
 
-        for module in modules:
+        for module in modules.copy():
             # Required to update helper and util file.
             if module.startswith(('userbot.helper_funcs.', 'userbot.utils.')):
                 reload(modules[module])
@@ -117,15 +117,18 @@ class UserBotClient(TelegramClient):
 
         text = "`Successfully restarted and imported all the plugins!`"
         if self.failed_imports:
-            text += "\n`Failed to import:`\n"
+            text = (
+                "`Couldn't import all the plugins. Check the console logs or"
+                " do a manual restart.`"
+            )
+            text += "\n`Failed imports:`\n"
             text += '\n'.join(self.failed_imports)
             self.failed_imports.clear()
         await event.edit(text)
 
         self.restarting = False
         LOGGER.info(
-            "Successfully restarted and imported all the plugins! "
-            "Current prefix: {}".format(self.prefix)
+            "Client restarted! Current prefix: {}".format(self.prefix)
         )
         print()
 
