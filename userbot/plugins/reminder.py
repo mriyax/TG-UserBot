@@ -15,64 +15,60 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from asyncio import sleep, create_task
-from telethon.tl.functions.messages import ToggleDialogPinRequest
+import asyncio
+import datetime
 
 from userbot import client
 from userbot.helper_funcs.time import string_to_secs
+from userbot.utils.helpers import _humanfriendly_seconds, get_chat_link
+from userbot.utils.events import NewMessage
+
 
 plugin_category = "user"
 
 
 @client.onMessage(
-    command=("remindme", plugin_category),
-    outgoing=True, regex=r"remindme(?: |$)(\w+)?(?: |$)([\s\S]*)"
+    command=("remindme/remindhere", plugin_category),
+    outgoing=True, regex=r"remind(me|here)(?: |$)(\w+)?(?: |$)([\s\S]*)"
 )
-async def remindme(event):
+async def remindme(event: NewMessage.Event) -> None:
     """Set a reminder to be sent to your Saved Messages in x amount of time."""
-    time = event.matches[0].group(1)
-    text = event.matches[0].group(2)
+    arg = event.matches[0].group(1)
+    time = event.matches[0].group(2)
+    text = event.matches[0].group(3)
+    media = False
+
     if not time:
+        await event.answer("Remind you when?")
+        return
+    elif not text and not event.reply_to_msg_id:
         await event.answer("Remind you with what?")
         return
 
     seconds = await string_to_secs(time)
-
-    if seconds != 0:
-        create_task(
-            _reminderTask(seconds, text)
-        )
-        text = f"`Reminder will be sent in Saved Messages after {time}.`"
-        if seconds >= 86400:
-            text += (
-                "`\nThis may not work as expected, not fully certain though.`"
-            )
-        await event.answer(
-            text,
-            log=("remindme", f"Set a reminder. ETA: {time}")
-        )
+    if event.reply_to_msg_id:
+        reply = await event.get_reply_message()
+        media = True
+    if arg == "here":
+        entity = event.chat_id
     else:
-        await event.answer("`No kan do. ma'am.`")
+        entity = client.config['userbot'].getint('logger_group_id', "self")
+    entity = await client.get_entity(entity)
 
-
-@client.onMessage(
-    command=("dismiss", plugin_category),
-    outgoing=True, regex=r"(?i)^dismiss$", disable_prefix=True
-)
-async def dismiss(event):
-    """Dismiss the current pinned message in Saved Messages."""
-    reply = await event.get_reply_message()
-    if reply:
-        await reply.delete()
-    await event.delete()
-
-    await client.pin_message(event.chat_id, message=None)
-
-
-async def _reminderTask(delay, string):
-    """Reminder task function used to send the reminder after sleep."""
-    await sleep(delay)
-    await client(
-        ToggleDialogPinRequest(peer="self", pinned=True)
-    )
-    await client.send_message("self", string)
+    if seconds >= 13:
+        await client.send_message(
+            entity=entity,
+            message=reply if media else text,
+            schedule=datetime.timedelta(seconds=seconds)
+        )
+        extra = await get_chat_link(entity)
+        human_time = await _humanfriendly_seconds(seconds)
+        message = f"`Reminder will be sent in` {extra} `after {human_time}.`"
+        await event.answer(
+            message,
+            log=("remindme", f"Set a reminder in {extra}.\nETA: {human_time}")
+        )
+        await asyncio.sleep(2)
+        await event.delete()
+    else:
+        await event.answer("`No kan do. ma'am. Minimum time should be 13s.`")

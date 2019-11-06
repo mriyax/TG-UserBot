@@ -15,24 +15,27 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from os.path import relpath
+import os.path
 
 from userbot import client
+from userbot.utils.events import NewMessage
 
-plugin_category = "helper"
-link = "https://tg-userbot.readthedocs.io/en/latest/userbot/commands.html"
+
+plugin_category: str = "helper"
+link: str = "https://tg-userbot.readthedocs.io/en/latest/userbot/commands.html"
+chunk: int = 5
 
 
 @client.onMessage(
     command=("setprefix", plugin_category),
     outgoing=True, regex=r"setprefix (.+)", builtin=True
 )
-async def setprefix(event):
+async def setprefix(event: NewMessage.Event) -> None:
     """Change the bot's default prefix."""
     match = event.matches[0].group(1).strip()
     old_prefix = client.prefix
     event.client.prefix = match
-    event.client.config['userbot']['prefix'] = match
+    event.client.config['userbot']['userbot_prefix'] = match
     if old_prefix is None:
         await event.answer(
             "`Successfully changed the prefix to `**{0}**`. "
@@ -58,11 +61,11 @@ async def setprefix(event):
     outgoing=True, regex=r"(?i)^resetprefix$", disable_prefix=True,
     builtin=True
 )
-async def resetprefix(event):
+async def resetprefix(event: NewMessage.Event) -> None:
     """Reset the bot's prefix to the default ones."""
-    prefix = event.client.config['userbot'].get('prefix', None)
+    prefix = event.client.config['userbot'].get('userbot_prefix', None)
     if prefix:
-        del client.config['userbot']['prefix']
+        del client.config['userbot']['userbot_prefix']
         event.client.prefix = None
         await event.answer(
             "`Succesffully reset your prefix to the deafult ones!`",
@@ -77,20 +80,23 @@ async def resetprefix(event):
 
 @client.onMessage(
     command=("enable", plugin_category),
-    outgoing=True, regex=r"enable (\w+)$", builtin=True
+    outgoing=True, regex=r"enable(?: |$)(\w+)?$", builtin=True
 )
-async def enable(event):
+async def enable(event: NewMessage.Event) -> None:
     """Enable a command IF it's already disabled."""
-    command = event.matches[0].group(1)
-    if event.client.disabled_commands.get(command, False):
-        com = event.client.disabled_commands.get(command)
-        for handler in com.handlers:
-            event.client.add_event_handler(com.func, handler)
-        event.client.commands.update({command: com})
-        del event.client.disabled_commands[command]
+    arg = event.matches[0].group(1)
+    if not arg:
+        await event.edit("`Enable what? The void?`")
+        return
+    command = event.client.disabled_commands.get(arg, False)
+    if command:
+        for handler in command.handlers:
+            event.client.add_event_handler(command.func, handler)
+        event.client.commands.update({arg: command})
+        del event.client.disabled_commands[arg]
         await event.answer(
-            f"`Successfully enabled {command}`",
-            log=("enable", f"Enabled command: {command}")
+            f"`Successfully enabled {arg}`",
+            log=("enable", f"Enabled command: {arg}")
         )
     else:
         await event.answer(
@@ -101,22 +107,25 @@ async def enable(event):
 
 @client.onMessage(
     command=("disable", plugin_category),
-    outgoing=True, regex=r"disable (\w+)$", builtin=True
+    outgoing=True, regex=r"disable(?: |$)(\w+)?$", builtin=True
 )
-async def disable(event):
+async def disable(event: NewMessage.Event) -> None:
     """Disable a command IF it's already enabled."""
-    command = event.matches[0].group(1)
-    if event.client.commands.get(command, False):
-        com = event.client.commands.get(command)
-        if com.builtin:
+    arg = event.matches[0].group(1)
+    if not arg:
+        await event.edit("`Disable what? The void?`")
+        return
+    command = event.client.commands.get(arg, False)
+    if command:
+        if command.builtin:
             await event.answer("`Cannot disable a builtin command.`")
         else:
-            event.client.remove_event_handler(com.func)
-            event.client.disabled_commands.update({command: com})
-            del event.client.commands[command]
+            event.client.remove_event_handler(command.func)
+            event.client.disabled_commands.update({arg: command})
+            del event.client.commands[arg]
             await event.answer(
-                f"`Successfully disabled {command}`",
-                log=("disable", f"Disabled command: {command}")
+                f"`Successfully disabled {arg}`",
+                log=("disable", f"Disabled command: {arg}")
             )
     else:
         await event.answer("`Couldn't find the specified command.`")
@@ -126,14 +135,13 @@ async def disable(event):
     command=("enabled", plugin_category),
     outgoing=True, regex="enabled$", builtin=True
 )
-async def commands(event):
+async def commands(event: NewMessage.Event) -> None:
     """A list of all the currently enabled commands."""
     response = "**Enabled commands:**"
     enabled = sorted(event.client.commands.keys())
-    chunk: int = 5
     for i in range(0, len(enabled), chunk):
         response += "\n  "
-        response += ", ".join("`" + c + "`" for c in enabled[i:i+chunk])
+        response += ", ".join('`' + c + '`' for c in enabled[i:i+chunk])
     await event.answer(response)
 
 
@@ -141,7 +149,7 @@ async def commands(event):
     command=("disabled", plugin_category),
     outgoing=True, regex="disabled$", builtin=True
 )
-async def disabled(event):
+async def disabled(event: NewMessage.Event) -> None:
     """A list of all the currently disabled commands."""
     disabled_commands = event.client.disabled_commands
 
@@ -151,10 +159,9 @@ async def disabled(event):
 
     response = "**Disabled commands:**"
     enabled = sorted(disabled_commands.keys())
-    chunk: int = 5
     for i in range(0, len(enabled), chunk):
         response += "\n  "
-        response += ", ".join("`" + c + "`" for c in enabled[i:i+chunk])
+        response += ", ".join('`' + c + '`' for c in enabled[i:i+chunk])
     await event.answer(response)
 
 
@@ -162,7 +169,7 @@ async def disabled(event):
     command=("help", plugin_category), builtin=True,
     outgoing=True, regex=r"help(?: |$)(.*)?"
 )
-async def helper(event):
+async def helper(event: NewMessage.Event) -> None:
     """A list of commands categories, their commands or command's details."""
     arg = event.matches[0].group(1)
     enabled = event.client.commands
@@ -173,24 +180,32 @@ async def helper(event):
         arg1 = True if arg.endswith(("dev", "details", "info")) else False
         if arg1:
             arg = ' '.join(arg.split(' ')[:-1])
-        if arg in [*enabled, *disabled]:
+        if arg == "all":
+            text = "**Enabled commands:**"
+            for name, command in sorted(enabled.items()):
+                text += f"\n**{name}**: `{command.info}`"
+            if disabled:
+                text += "\n**Disabled commands:**"
+                for name, command in sorted(disabled.items()):
+                    text += f"\n**{name}**: `{command.info}`"
+        elif arg in [*enabled, *disabled]:
             merged = {**enabled, **disabled}
             command = merged.get(arg)
             text = (
-                f"**{arg.title()} Command:**\n"
-                f"  **Built-in:** `{command.builtin}`\n"
+                f"**{arg.title()} command:**\n"
+                f"  **Disableable:** `{not command.builtin}`\n"
                 f"  **Info:** `{command.info}`\n"
             )
             if arg1:
-                filename = relpath(command.func.__code__.co_filename)
+                filename = os.path.relpath(command.func.__code__.co_filename)
                 text += (
-                    f"  **Registered Function:** `{command.func.__name__}`\n"
+                    f"  **Registered function:** `{command.func.__name__}`\n"
                     f"    **File:** `{filename}`\n"
                     f"    **Line:** `{command.func.__code__.co_firstlineno}`\n"
                 )
         elif arg in categories:
             category = categories.get(arg)
-            text = f"**{arg.title()} Commands:**"
+            text = f"**{arg.title()} commands:**"
             for com in sorted(category):
                 text += f"\n    **{com}**"
         else:
@@ -200,9 +215,11 @@ async def helper(event):
             return
     else:
         text = (
-            f"Documented Commands can be found [here]({link})\n"
-            f"**Usage:**\n  __{client.prefix or '.'}help <category>__\n"
-            f"  __{client.prefix or '.'}help <command>__\n\n"
+            f"Documented commands can be found [HERE!]({link})\n"
+            f"**Usage:**\n"
+            f"  __{client.prefix or '.'}help <category>__\n"
+            f"  __{client.prefix or '.'}help <command>__\n"
+            f"  __{client.prefix or '.'}help all__\n\n"
             "**Available command categories:**"
         )
         for category in sorted(categories.keys()):

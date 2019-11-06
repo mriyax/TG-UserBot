@@ -15,14 +15,14 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from sys import executable
-from inspect import isawaitable
-from asyncio import (
-    create_subprocess_exec, create_subprocess_shell, subprocess, sleep
-)
-from telethon.utils import get_display_name
+import asyncio
+import inspect
+import sys
 
 from userbot import client
+from userbot.utils.helpers import get_chat_link
+from userbot.utils.events import NewMessage
+
 
 plugin_category = "terminal"
 
@@ -31,7 +31,7 @@ plugin_category = "terminal"
     command=("eval", plugin_category),
     outgoing=True, regex=r"eval(?: |$)([\s\S]*)"
 )
-async def evaluate(event):
+async def evaluate(event: NewMessage.Event) -> None:
     """Evaluate something in the running script."""
     expression = event.matches[0].group(1).strip()
     reply = await event.get_reply_message()
@@ -43,19 +43,14 @@ async def evaluate(event):
         result = eval(
             expression, {'client': client, 'event': event, 'reply': reply}
         )
-        if isawaitable(result):
+        if inspect.isawaitable(result):
             result = await result
         result = str(result)
     except Exception as e:
         await event.answer('`' + type(e).__name__ + ': ' + str(e) + '`')
         return
 
-    chat = await event.get_chat()
-    if event.is_private:
-        extra = f"[{get_display_name(chat)}](tg://user?id={chat.id})"
-    else:
-        username = '@' + chat.username if chat.username else chat.id
-        extra = f"[{chat.title}] ( {username} )"
+    extra = await get_chat_link(event, event.id)
     await event.answer(
         "```" + result + "```",
         log=("eval", f"Successfully evaluated {expression} in {extra}!"),
@@ -67,7 +62,7 @@ async def evaluate(event):
     command=("exec", plugin_category),
     outgoing=True, regex=r"exec(?: |$)([\s\S]*)"
 )
-async def execute(event):
+async def execute(event: NewMessage.Event) -> None:
     """Execute Python code in a subprocess."""
     message = (
         str(event.chat_id) +
@@ -86,10 +81,10 @@ async def execute(event):
         await event.answer("Executed the void.")
         return
 
-    process = await create_subprocess_exec(
-        executable, '-c', code,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, '-c', code,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
 
     client.running_processes.update({
@@ -108,12 +103,7 @@ async def execute(event):
     if stderr:
         text += "\n[stderr]\n" + stderr.decode('UTF-8').strip() + "\n"
 
-    chat = await event.get_chat()
-    if event.is_private:
-        extra = f"[{get_display_name(chat)}](tg://user?id={chat.id})"
-    else:
-        username = '@' + chat.username if chat.username else chat.id
-        extra = f"[{chat.title}] ( {username} )"
+    extra = await get_chat_link(event, event.id)
     if stdout or stderr:
         await event.answer(
             "```" + text + "```",
@@ -128,7 +118,7 @@ async def execute(event):
     command=("term", plugin_category),
     outgoing=True, regex=r"term(?: |$)([\s\S]*)"
 )
-async def terminal(event):
+async def terminal(event: NewMessage.Event) -> None:
     """Execute terminal commands in a subprocess."""
     message = (
         str(event.chat_id) +
@@ -147,10 +137,10 @@ async def terminal(event):
         await event.answer("Executed the void.")
         return
 
-    process = await create_subprocess_shell(
+    process = await asyncio.create_subprocess_shell(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
 
     client.running_processes.update({
@@ -169,12 +159,7 @@ async def terminal(event):
     if stderr:
         text += "\n[stderr]\n" + stderr.decode('UTF-8').strip() + "\n"
 
-    chat = await event.get_chat()
-    if event.is_private:
-        extra = f"[{get_display_name(chat)}](tg://user?id={chat.id})"
-    else:
-        username = '@' + chat.username if chat.username else chat.id
-        extra = f"[{chat.title}] ( {username} )"
+    extra = await get_chat_link(event, event.id)
     if stdout or stderr:
         await event.answer(
             "```" + text + "```",
@@ -190,7 +175,7 @@ async def terminal(event):
     outgoing=True, regex=r"(kill|terminate)$",
     info="Kill or Terminate a subprocess which is still running"
 )
-async def killandterminate(event):
+async def killandterminate(event: NewMessage.Event) -> None:
     """Kill or terminate a running subprocess."""
     if not event.reply_to_msg_id:
         await event.answer(
@@ -216,20 +201,13 @@ async def killandterminate(event):
             running_process.kill()
         else:
             running_process.terminate()
-        chat = await reply.get_chat()
-        if event.is_private:
-            proc = (
-                f"proccess in [{get_display_name(chat)}]"
-                f"(tg://user?id={chat.id})"
-            )
-        else:
-            proc = f"[process](https://t.me/c/{chat.id}/{reply.id})"
+        extra = await get_chat_link(event, reply.id)
         await event.answer(
             f"`Successfully {option}ed the process.`",
-            log=(option, f"Successfully {option}ed a {proc}!"),
+            log=(option, f"Successfully {option}ed a process in {extra}!"),
             reply=True
         )
-        await sleep(2)
+        await asyncio.sleep(2)
         await event.delete()
     else:
         await event.answer("`There is no process running for this message.`")

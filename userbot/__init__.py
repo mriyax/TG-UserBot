@@ -15,73 +15,101 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
-import redis
-import userbot.utils.client
+import configparser
+import logging
+import os.path
+import platform
+import sys
 
-from configparser import ConfigParser
-from os.path import abspath, basename, dirname, isfile, join
-from packaging.version import parse
-from sys import exit, platform, version_info
-from logging import (
-    getLogger, DEBUG, INFO, ERROR, CRITICAL
+import redis
+from telethon.tl import types
+
+from .utils.sessions import RedisSession
+from .utils.helpers import resolve_env
+from .utils.client import UserBotClient
+
+
+__version__ = "0.4"
+__license__ = "GNU General Public License v3.0"
+__author__ = 'Kandarp <https://github.com/kandnub>'
+__copyright__ = (
+    "TG-UserBot  Copyright (C) 2019  Kandarp <https://github.com/kandnub>"
+)
+LEVELS = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'ERROR': logging.ERROR,
+    'CRITICAL': logging.CRITICAL
+}
+config = configparser.ConfigParser()
+
+config_file = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), 'config.ini'
+)
+sql_session = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), 'userbot.session'
 )
 
-from telethon.tl.types import User
-from userbot.utils.sessions import RedisSession
-from userbot.utils.helpers import resolve_env
-
-UserBotClient = userbot.utils.client.UserBotClient
-config = ConfigParser()
-
-config_file = join(dirname(dirname(__file__)), 'config.ini')
-pyversion = ".".join(str(num) for num in version_info if isinstance(num, int))
-
-if parse(pyversion) < parse('3.7'):
+if platform.python_version_tuple() < ('3', '7', '3'):
     print(
-        "Please run this script with Python 3.7 or above."
+        "Please run this script with Python 3.7.3 or above."
         "\nExiting the script."
     )
-    exit(1)
+    sys.exit(1)
 
-if basename(abspath('.')) == 'source':  # To avoid errors from Sphinx
-    sphinx = True
-else:
-    sphinx = False
-
-if isfile(config_file) or sphinx:
-    if sphinx:
-        config_file = join(dirname(dirname(__file__)), 'sample_config.ini')
+if os.path.isfile(config_file):
     config.read(config_file)
-else:
-    try:
-        resolve_env(config)
-    except ValueError:
-        print(
-            "Please make sure you have a proper config.ini in this directory "
-            "or the required environment variables set."
-            "\nExiting the script."
-        )
-        exit(1)
+    resolve_env(config)
 
-ROOT_LOGGER = getLogger()
-LOGGER = getLogger(__name__)
+try:
+    resolve_env(config)
+except ValueError:
+    print(
+        "Please make sure you have a proper config.ini in this directory "
+        "or the required environment variables set."
+        "\nExiting the script."
+    )
+    sys.exit(1)
+
+ROOT_LOGGER = logging.getLogger()
+LOGGER = logging.getLogger(__name__)
+
+if "telethon" not in config:
+    print(
+        "You're not using a valid config, refer to the sample_config.ini"
+    )
+    sys.exit(1)
+
+telethon = config['telethon']
+API_ID = telethon.getint('api_id', False)
+API_HASH = telethon.get('api_hash', False)
+REDIS_ENDPOINT = telethon.get('redis_endpoint', False)
+REDIS_PASSWORD = telethon.get('redis_password', False)
+REDIS = bool(REDIS_ENDPOINT) and bool(REDIS_PASSWORD)
 
 userbot = config['userbot']
-telethon = config['telethon']
-
 LOGGER_CHAT_ID = userbot.getint('logger_group_id', 0)
 CONSOLE_LOGGER = userbot.get('console_logger_level', 'INFO')
-REDIS_ENDPOINT = telethon.get('redis_endpoint', None)
-REDIS_PASSWORD = telethon.get('redis_password', None)
 
-if not REDIS_ENDPOINT or not REDIS_PASSWORD:
-    LOGGER.info(
-        "Consider making an account on redislab.com and updating your config "
-        "with the redis endpoint and password, if you want to run on Heroku!"
-    )
-    redis_session = False
-    session = "userbot"
+if CONSOLE_LOGGER.upper() in LEVELS:
+    level = LEVELS[CONSOLE_LOGGER.upper()]
+    ROOT_LOGGER.setLevel(level)
+    LOGGER.setLevel(level)
+
+if sys.platform.startswith('win'):
+    from asyncio import ProactorEventLoop
+    from os import system
+
+    loop = ProactorEventLoop()
+    system('color')
 else:
+    loop = None
+
+if not API_ID and not API_HASH:
+    print("You need to set your API keys in your config or environment!")
+    LOGGER.debug("No API keys!")
+    sys.exit(1)
+elif REDIS:
     REDIS_HOST = REDIS_ENDPOINT.split(':')[0]
     REDIS_PORT = REDIS_ENDPOINT.split(':')[1]
     redis_connection = redis.Redis(
@@ -92,54 +120,38 @@ else:
     except Exception as e:
         LOGGER.exception(e)
         print()
-        LOGGER.warning(
-            "Make sure you have the correct Redis endpoint and password."
+        LOGGER.error(
+            "Make sure you have the correct Redis endpoint and password "
+            "and your machine can make connections."
         )
-        exit(1)
+        sys.exit(1)
     redis_session = True
+    LOGGER.debug("Redis connection and Redis session")
     session = RedisSession("userbot", redis_connection)
-
-LEVELS = {
-    'DEBUG': DEBUG,
-    'INFO': INFO,
-    'ERROR': ERROR,
-    'CRITICAL': CRITICAL
-}
-
-
-if CONSOLE_LOGGER.upper() in LEVELS:
-    level = LEVELS[CONSOLE_LOGGER.upper()]
-    ROOT_LOGGER.setLevel(level)
-    LOGGER.setLevel(level)
-
-
-if platform.startswith('win'):
-    from asyncio import ProactorEventLoop
-    from os import system
-
-    loop = ProactorEventLoop()
-    system('color')
+elif os.path.isfile(sql_session) or (API_ID and API_HASH):
+    redis_session = False
+    session = "userbot"
+    LOGGER.debug("SQL session")
 else:
-    loop = None
-
-__version__ = "0.4"
-__license__ = "GNU General Public License v3.0"
-__author__ = 'Kandarp <https://github.com/kandnub>'
-__copyright__ = (
-    "TG-UserBot  Copyright (C) 2019  Kandarp <https://github.com/kandnub>"
-)
+    LOGGER.error(
+        "Make a proper config with your API keys to at least run the scrip or "
+        "make an account on redislabs.com and update your config with the "
+        "redis endpoint and password, if you want to use a Redis session!"
+    )
+    sys.exit(1)
 
 client = UserBotClient(
     session=session,
-    api_id=telethon.getint('api_id', None),
-    api_hash=telethon.get('api_hash', None),
+    api_id=API_ID,
+    api_hash=API_HASH,
     loop=loop,
-    app_version=__version__
+    app_version=__version__,
+    auto_reconnect=True
 )
 
 client.version = __version__
 client.config = config
-client.prefix = userbot.get('prefix', None)
+client.prefix = userbot.get('userbot_prefix', None)
 
 
 def verifyLoggerGroup(client: UserBotClient) -> None:
@@ -154,7 +166,7 @@ def verifyLoggerGroup(client: UserBotClient) -> None:
         entity = client.loop.run_until_complete(
             client.get_entity(LOGGER_CHAT_ID)
         )
-        if not isinstance(entity, User):
+        if not isinstance(entity, types.User):
             if not entity.creator:
                 if entity.default_banned_rights.send_messages:
                     disable_logger(

@@ -15,12 +15,19 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from asyncio import create_subprocess_shell, subprocess
-from datetime import datetime
-from sys import platform
-from telethon.tl.functions.help import GetNearestDcRequest
+import asyncio
+import concurrent
+import datetime
+import sys
+from typing import Tuple
+
+from speedtest import Speedtest
+
+from telethon.tl import functions
 
 from userbot import client
+from userbot.utils.helpers import get_chat_link
+from userbot.utils.events import NewMessage
 
 
 plugin_category = "www"
@@ -31,17 +38,21 @@ DCs = {
     4: "149.154.167.91",
     5: "91.108.56.149"
 }
+testing = "`Testing from %(isp)s`"
+hosted = "`Hosted by %(sponsor)s (%(name)s) [%(d)0.2f km]: %(latency)s ms`"
+download = "`Download: %0.2f M%s/s`"
+upload = "`Upload: %0.2f M%s/s`"
 
 
 @client.onMessage(
     command=("ping", plugin_category),
     outgoing=True, regex="ping$"
 )
-async def ping(event):
+async def ping(event: NewMessage.Event) -> None:
     """Check how long it takes to get an update and respond to it."""
-    start = datetime.now()
+    start = datetime.datetime.now()
     await event.answer("**PONG**")
-    duration = (datetime.now() - start)
+    duration = (datetime.datetime.now() - start)
     milliseconds = duration.microseconds / 1000
     await event.answer(f"**PONG:** `{milliseconds}ms`")
 
@@ -50,9 +61,9 @@ async def ping(event):
     command=("nearestdc", plugin_category),
     outgoing=True, regex="nearestdc$"
 )
-async def nearestdc(event):
+async def nearestdc(event: NewMessage.Event) -> None:
     """Get information of your country and data center information."""
-    result = await client(GetNearestDcRequest())
+    result = await client(functions.help.GetNearestDcRequest())
     text = (
         f"**Country:** `{result.country}`\n" +
         f"**This DC:** `{result.this_dc}`\n" +
@@ -65,34 +76,83 @@ async def nearestdc(event):
     command=("pingdc", plugin_category),
     outgoing=True, regex=r"pingdc(?: |$)(\d+)?"
 )
-async def pingdc(event):
+async def pingdc(event: NewMessage.Event) -> None:
     """Ping your or other data center's IP addresses."""
     if event.matches[0].group(1) in ('1', '2', '3', '4', '5'):
         dc = int(event.matches[0].group(1))
     else:
-        raw_dc = await client(GetNearestDcRequest())
+        raw_dc = await client(functions.help.GetNearestDcRequest())
         dc = raw_dc.this_dc
-    param = "-n" if platform.startswith("win") else "-c"
+    param = "-n" if sys.platform.startswith("win") else "-c"
     cmd = f"ping {param} 1 {DCs[dc]}"
 
-    if platform.startswith("win"):
+    if sys.platform.startswith("win"):
         out, err = await _sub_shell(cmd)
         average = out.split("Average = ")[1]
     else:
         out, err = await _sub_shell(cmd + " | awk -F '/' 'END {print $5}'")
         average = (out.strip() + "ms")
+
+    if len(out.strip()) == 0:
+        await event.answer(
+            "`Make sure your system's routing access isn't deprecated.`"
+        )
+        return
+
     if err:
         await event.answer(err)
         return
     await event.answer(f"DC {dc}'s average response: `{average}`")
 
 
-async def _sub_shell(cmd):
-    process = await create_subprocess_shell(
+@client.onMessage(
+    command=("speedtest", plugin_category),
+    outgoing=True, regex=r"speedtest(?: |$)(bit|byte)?(?:s$|$)"
+)
+async def speedtest(event: NewMessage.Event) -> None:
+    """Perform a speedtest with the best available server based on ping."""
+    n = 1
+    unit = "bit"
+    arg = event.matches[0].group(1)
+    if arg and arg.lower() == "byte":
+        n = 8
+        unit = "byte"
+
+    s = Speedtest()
+    speed_event = await event.answer(testing % s.results.client)
+    await _run_sync(s.get_servers)
+
+    await _run_sync(s.get_best_server)
+    text = (f"{speed_event.text}\n{hosted % s.results.server}")
+    speed_event = await event.answer(text)
+
+    await _run_sync(s.download)
+    down = (s.results.download / 1000.0 / 1000.0) / n
+    text = (f"{speed_event.text}\n{download % (down, unit)}")
+    speed_event = await event.answer(text)
+
+    await _run_sync(s.upload)
+    up = (s.results.upload / 1000.0 / 1000.0) / n
+    text = (f"{speed_event.text}\n{upload % (up, unit)}")
+    extra = await get_chat_link(event, event.id)
+    await event.answer(
+        text,
+        log=("speedtest", f"Performed a speedtest in {extra}.")
+    )
+
+
+async def _sub_shell(cmd: str) -> Tuple[str, str]:
+    process = await asyncio.create_subprocess_shell(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
     stdout, stderr = await process.communicate()
 
     return stdout.decode("UTF-8"), stderr.decode("UTF-8")
+
+
+async def _run_sync(func: callable):
+    return await client.loop.run_in_executor(
+        concurrent.futures.ThreadPoolExecutor(), func
+    )

@@ -15,19 +15,26 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from telethon.tl.types import (
-    ChannelFull, ChatFull, UserFull
-)
+from typing import Union
+
+from telethon.tl import types
+from telethon.utils import get_peer_id
+
+from ..utils.events import NewMessage
 
 
 class Parser:
     """Parse UserFull, ChannelFull and ChatFull objects."""
 
     @staticmethod
-    async def parse_full_user(usr_obj: UserFull, event) -> str:
+    async def parse_full_user(
+        usr_obj: types.UserFull,
+        event: NewMessage.Event
+    ) -> str:
+        """Human-friendly string of an User obj's attributes"""
         user = usr_obj.user
 
-        user_id = user.id
+        user_id = get_peer_id(user.id)
         is_self = user.is_self
         contact = user.contact
         mutual_contact = user.mutual_contact
@@ -82,16 +89,19 @@ class Parser:
             text += f"\n**Scam:** `{scam}`"
         if total_pics:
             text += f"\n**Total profile pictures:** `{total_pics}`"
-
         return text
 
     @staticmethod
-    async def parse_full_chat(chat_obj: (ChatFull, ChannelFull), event) -> str:
+    async def parse_full_chat(
+        chat_obj: Union[types.ChatFull, types.ChannelFull],
+        event: NewMessage.Event
+    ) -> str:
+        """Human-friendly string of a Chat/Channel obj's attributes"""
         full_chat = chat_obj.full_chat
         chats = chat_obj.chats[0]
         profile_pic = full_chat.chat_photo
 
-        if isinstance(full_chat, ChatFull):
+        if isinstance(full_chat, types.ChatFull):
             obj_type = "CHAT"
             participants = len(chats.participants)
         else:
@@ -105,7 +115,7 @@ class Parser:
             banned = full_chat.banned_count
             online = full_chat.online_count
 
-        chat_id = full_chat.id
+        chat_id = get_peer_id(full_chat.id)
         title = chats.title
         creator = chats.creator
         left = chats.left
@@ -152,5 +162,4 @@ class Parser:
 
         if total_pics:
             text += f"\n**Total profile pictures:** `{total_pics}`"
-
         return text

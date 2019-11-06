@@ -16,18 +16,23 @@
 
 
 import aiohttp
+import bs4
+import concurrent
+import functools
 import io
 import re
 import requests
-from bs4 import BeautifulSoup
-from functools import partial
-from urllib import request
-from telethon.utils import get_extension, get_display_name
+import urllib
+
+from telethon.utils import get_extension
 
 from userbot import client
+from userbot.utils.helpers import get_chat_link
+from userbot.utils.events import NewMessage
 
 
-opener = request.build_opener()
+opener = urllib.request.build_opener()
+loop = client.loop
 light_useragent = """Mozilla/5.0 (Linux; Android 6.0.1; SM-G920V Build/\
 MMB29K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.98 \
 Mobile Safari/537.36"""
@@ -40,7 +45,7 @@ heavy_useragent = """Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
     command="reverse", info="Reverse search images on Google",
     outgoing=True, regex=r"reverse(?: |$)(\d*)"
 )
-async def reverse(event):
+async def reverse(event: NewMessage.Event) -> None:
     """Reverse search supported media types on Google images."""
 
     reply = await event.get_reply_message()
@@ -61,9 +66,7 @@ async def reverse(event):
     photo.seek(0)
     name = "media" + ext
 
-    response = await client.loop.run_in_executor(
-        None, partial(_post, name, photo)
-    )
+    response = await _run_sync(functools.partial(_post, name, photo))
 
     fetchUrl = response.headers['Location']
     photo.close()
@@ -86,15 +89,8 @@ async def reverse(event):
             text += "\n\n**" + matching_text + ":**"
             for title, link in matching.items():
                 text += f"\n[{title.strip()}]({link.strip()})"
-        chat = await event.get_chat()
-        if event.is_private:
-            msg = (
-                f"media in [{get_display_name(chat)}]"
-                f"(tg://user?id={chat.id})"
-            )
-        else:
-            msg = f"[media](https://t.me/c/{chat.id}/{reply.id})"
-        extra = f"Successfully reversed {msg}: [{guess}]({fetchUrl})"
+        msg = await get_chat_link(event, event.id)
+        extra = f"Successfully reversed media in {msg}: [{guess}]({fetchUrl})"
         await event.answer(text, log=("reverse", extra))
     else:
         await event.answer("`Couldn't find anything for you.`")
@@ -130,10 +126,8 @@ async def _scrape_url(googleurl):
 
     opener.addheaders = [('User-agent', heavy_useragent)]
 
-    source = await client.loop.run_in_executor(
-        None, partial(opener.open, googleurl)
-    )
-    soup = BeautifulSoup(source.read(), 'html.parser')
+    source = await _run_sync(functools.partial(opener.open, googleurl))
+    soup = bs4.BeautifulSoup(source.read(), 'html.parser')
 
     result = {
         'similar_images': '',
@@ -179,9 +173,7 @@ async def _get_similar_links(link: str, lim: int = 2):
 
     opener.addheaders = [('User-agent', light_useragent)]
 
-    source = await client.loop.run_in_executor(
-        None, partial(opener.open, link)
-    )
+    source = await _run_sync(functools.partial(opener.open, link))
 
     links = []
     counter = 0
@@ -204,3 +196,9 @@ async def _get_similar_links(link: str, lim: int = 2):
                 break
 
     return links
+
+
+async def _run_sync(func: callable):
+    return await loop.run_in_executor(
+        concurrent.futures.ThreadPoolExecutor(), func
+    )

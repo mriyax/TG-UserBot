@@ -18,23 +18,21 @@
 # This was purely based on https://github.com/ezdev128/telethon-session-redis/
 # since it hasn't been updated for a while now and missed a few things.
 
+
+import logging
+
 import redis
 
-from logging import getLogger
-
 from telethon.crypto import AuthKey
-from telethon.sessions.memory import MemorySession
+from telethon.sessions import MemorySession
 """
-from telethon.sessions.memory import _SentFileType
 from telethon import utils
-from telethon.tl.types import (
-    PeerUser, PeerChat, PeerChannel,
-    InputPhoto, InputDocument
-)
+from telethon.sessions.memory import _SentFileType
+from telethon.tl import types
 """
 
 
-LOGGER = getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class RedisSession(MemorySession):
@@ -102,9 +100,9 @@ class RedisSession(MemorySession):
     def _get_sessions(self, strip_prefix=False):
         key_pattern = "{}:auth".format(self.sess_prefix)
         try:
-            sessions = self.redis_connection.keys(key_pattern+"*")
+            sessions = self.redis_connection.keys(key_pattern + '*')
             return [
-                s.decode().replace(key_pattern, "")
+                s.decode().replace(key_pattern, '')
                 if strip_prefix else
                 s.decode() for s in sessions
             ]
@@ -125,7 +123,7 @@ class RedisSession(MemorySession):
             'takeout_id': self.takeout_id or b''
         }
 
-        key = "{}:auth".format(self.sess_prefix, self._dc_id)
+        key = "{}:auth".format(self.sess_prefix)
         try:
             self.redis_connection.hmset(key, s)
         except Exception as ex:
@@ -268,9 +266,9 @@ class RedisSession(MemorySession):
                 return None
         else:
             ids = (
-                utils.get_peer_id(PeerUser(id)),
-                utils.get_peer_id(PeerChat(id)),
-                utils.get_peer_id(PeerChannel(id))
+                utils.get_peer_id(types.PeerUser(id)),
+                utils.get_peer_id(types.PeerChat(id)),
+                utils.get_peer_id(types.PeerChannel(id))
             )
             try:
                 for key in self._get_entities():
@@ -282,7 +280,7 @@ class RedisSession(MemorySession):
                 LOGGER.exception(ex.args)
 
     def cache_file(self, md5_digest, file_size, instance):
-        if not isinstance(instance, (InputDocument, InputPhoto)):
+        if not isinstance(instance, (types.InputDocument, types.InputPhoto)):
             raise TypeError('Cannot cache %s instance' % type(instance))
 
         key = "{}:sent_files:{}".format(self.sess_prefix, md5_digest)
