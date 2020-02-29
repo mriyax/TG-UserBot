@@ -15,6 +15,7 @@
 # along with TG-UserBot.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import asyncio
 import configparser
 import datetime
 import logging
@@ -26,18 +27,23 @@ from typing import Union
 from heroku3 import from_key
 
 from telethon import errors
-from telethon.tl.types import User, Chat, Channel
+from telethon.tl import types
 from telethon.utils import get_display_name
 
 from .client import UserBotClient
 from .log_formatter import CEND, CUSR
 from .events import NewMessage
+from userbot.plugins import plugins_data
 
 
 LOGGER = logging.getLogger(__name__)
+sample_config_file = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    'sample_config.ini'
+)
 
 
-def printUser(entity: User) -> None:
+def printUser(entity: types.User) -> None:
     """Print the user's first name + last name upon start"""
     user = get_display_name(entity)
     print(
@@ -67,10 +73,10 @@ def resolve_env(config: configparser.ConfigParser):
         api_hash = config['telethon'].get('api_hash', False)
 
     if not api_id or not api_hash:
-        raise ValueError
+        raise ValueError('You need to set your API Keys at least.')
 
     sample_config = configparser.ConfigParser()
-    sample_config.read('sample_config.ini')
+    sample_config.read(sample_config_file)
     for section in sample_config.sections():
         if section not in config:
             config[section] = {}
@@ -96,7 +102,7 @@ def resolve_env(config: configparser.ConfigParser):
         'api_key_heroku': os.getenv(
             'api_key_heroku', None
         ),
-        'removebg': os.getenv(
+        'api_key_removebg': os.getenv(
             'api_key_removebg', None
         )
     }
@@ -109,7 +115,7 @@ async def isRestart(client: UserBotClient) -> None:
     """Check if the script restarted itself and edit the last message"""
     userbot_restarted = os.environ.get('userbot_restarted', False)
     heroku = client.config['api_keys'].get('api_key_heroku', False)
-    updated = os.environ.get('userbot_update', False)
+    updated = os.environ.pop('userbot_update', False)
     disabled_commands = False
 
     async def success_edit(text):
@@ -118,7 +124,7 @@ async def isRestart(client: UserBotClient) -> None:
         try:
             await client.edit_message(entity, message, text)
         except (
-            errors.MessageAuthorRequiredError,
+            ValueError, errors.MessageAuthorRequiredError,
             errors.MessageNotModifiedError, errors.MessageIdInvalidError
         ):
             LOGGER.debug(f"Failed to edit message ({message}) in {entity}.")
@@ -126,7 +132,6 @@ async def isRestart(client: UserBotClient) -> None:
 
     if updated:
         text = "`Successfully updated and restarted the userbot!`"
-        del os.environ['userbot_update']
     else:
         text = '`Successfully restarted the userbot!`'
     if userbot_restarted:
@@ -163,19 +168,28 @@ async def isRestart(client: UserBotClient) -> None:
             await disable_commands(client, disabled_commands)
 
 
-async def restart(event: NewMessage.Event) -> None:
+def restarter(client: UserBotClient) -> None:
     args = [sys.executable, "-m", "userbot"]
-    restart_message = f"{event.chat_id}/{event.message.id}"
-    os.environ.setdefault('userbot_restarted', restart_message)
-    if event.client.disabled_commands:
-        disabled_list = ", ".join(event.client.disabled_commands.keys())
-        os.environ.setdefault('userbot_disabled_commands', disabled_list)
+    if client.disabled_commands:
+        disabled_list = ", ".join(client.disabled_commands.keys())
+        os.environ['userbot_disabled_commands'] = disabled_list
+    if os.environ.get('userbot_afk', False):
+        plugins_data.dump_AFK()
+    client._kill_running_processes()
 
     if sys.platform.startswith('win'):
         os.spawnle(os.P_NOWAIT, sys.executable, *args, os.environ)
     else:
         os.execle(sys.executable, *args, os.environ)
-    await event.client.disconnect()
+
+
+async def restart(event: NewMessage.Event) -> None:
+    event.client.reconnect = False
+    restart_message = f"{event.chat_id}/{event.message.id}"
+    os.environ['userbot_restarted'] = restart_message
+    restarter(event.client)
+    if event.client.is_connected():
+        await event.client.disconnect()
 
 
 def make_config(
@@ -215,16 +229,21 @@ async def _human_friendly_timedelta(timedelta: str) -> str:
         unit = "second" if s == 1 else "seconds"
         delimiter = " and " if len(text) > 1 else ''
         text += f"{delimiter}{s} {unit}"
+    if len(text) == 0:
+        text = "\u221E (less than 1 second)"
     return text
 
 
-async def get_chat_link(arg: Union[User, Chat, Channel], reply=None) -> str:
-    if isinstance(arg, (User, Chat, Channel)):
+async def get_chat_link(
+    arg: Union[types.User, types.Chat, types.Channel, NewMessage.Event],
+    reply=None
+) -> str:
+    if isinstance(arg, (types.User, types.Chat, types.Channel)):
         entity = arg
     else:
         entity = await arg.get_chat()
 
-    if isinstance(entity, User):
+    if isinstance(entity, types.User):
         extra = f"[{get_display_name(entity)}](tg://user?id={entity.id})"
     else:
         if hasattr(entity, 'username') and entity.username is not None:
@@ -253,3 +272,13 @@ async def disable_commands(client: UserBotClient, commands: str) -> None:
             client.disabled_commands.update({command: target})
             del client.commands[command]
             LOGGER.debug("Disabled command: %s", command)
+
+
+async def is_ffmpeg_there():
+    cmd = await asyncio.create_subprocess_shell(
+        'ffmpeg -version',
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    await cmd.communicate()
+    return True if cmd.returncode == 0 else False

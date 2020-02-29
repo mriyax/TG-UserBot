@@ -33,6 +33,11 @@ author_link = "[{author}]({url}commits?author={author})"
 summary = "\n[{rev}]({url}commit/{sha}) `{summary}`\n"
 commited = "{committer}` committed {elapsed} ago`\n"
 authored = "{author}` authored and `{committer}` committed {elapsed} ago`\n"
+main_repo = "https://github.com/kandnub/TG-UserBot.git"
+requirements_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    'requirements.txt'
+)
 
 
 @client.onMessage(
@@ -42,17 +47,19 @@ authored = "{author}` authored and `{committer}` committed {elapsed} ago`\n"
 async def updater(event: NewMessage.Event) -> None:
     """Pull newest changes from the official repo and update the script/app."""
     arg = event.matches[0].group(1)
-    main_repo = "https://github.com/kandnub/TG-UserBot.git"
+    await event.answer("`Checking for updates!`")
     try:
         repo = git.Repo(basedir)
-        fetched_itmes = repo.remotes.origin.fetch()
+        fetched_items = repo.remotes.origin.fetch()
     except git.exc.NoSuchPathError as path:
         await event.answer(f"`Couldn't find {path}!`")
+        repo.__del__()
         return
     except git.exc.GitCommandError as command:
         await event.answer(
             f"`An error occured trying to get the Git Repo.`\n`{command}`"
         )
+        repo.__del__()
         return
     except git.exc.InvalidGitRepositoryError:
         repo = git.Repo.init(basedir)
@@ -61,16 +68,32 @@ async def updater(event: NewMessage.Event) -> None:
             await event.answer(
                 "`The main repository does not exist. Remote is invalid!`"
             )
+            repo.__del__()
             return
-        fetched_itmes = origin.fetch()
+        fetched_items = origin.fetch()
         repo.create_head('master', origin.refs.master).set_tracking_branch(
             origin.refs.master
         ).checkout()
-    fetched_commits = repo.iter_commits(f"HEAD..{fetched_itmes[0].ref.name}")
-
-    await event.answer("`Checking for updates!`")
+    fetched_commits = repo.iter_commits(f"HEAD..{fetched_items[0].ref.name}")
     untracked_files = repo.untracked_files
     old_commit = repo.head.commit
+    for diff_added in old_commit.diff('FETCH_HEAD').iter_change_type('M'):
+        if "requirements.txt" in diff_added.b_path:
+            await event.answer("`Updating the pip requirements!`")
+            updated = await update_requirements()
+            if updated == 0:
+                await event.answer("`Successfully updated the requirements.`")
+            else:
+                if isinstance(updated, int):
+                    await event.answer(
+                        "`Failed trying to install requirements."
+                        " Install them manually and run the command again.`"
+                    )
+                else:
+                    await event.answer(f'```{updated}```')
+                return
+            break
+
     if arg == "add":
         repo.index.add(untracked_files, force=True)
         repo.index.commit("[TG-UserBot] Updater: Untracked files")
@@ -78,7 +101,7 @@ async def updater(event: NewMessage.Event) -> None:
         repo.head.reset('--hard')
 
     try:
-        pull = repo.remotes.origin.pull()
+        repo.remotes.origin.pull()
     except git.exc.GitCommandError as command:
         text = (
             "`An error occured trying to Git pull:`\n`{0}`\n\n"
@@ -87,11 +110,13 @@ async def updater(event: NewMessage.Event) -> None:
         )
         prefix = client.prefix if client.prefix is not None else '.'
         await event.answer(text.format(command, prefix))
+        repo.__del__()
         return
 
     new_commit = repo.head.commit
     if old_commit == new_commit:
         await event.answer("`Already up-to-date!`")
+        repo.__del__()
         return
 
     remote_url = repo.remote().url.replace(".git", '/')
@@ -143,21 +168,28 @@ async def updater(event: NewMessage.Event) -> None:
     heroku_api_key = client.config['api_keys'].get('api_key_heroku', False)
     if os.getenv("DYNO", False) and heroku_api_key:
         heroku_conn = heroku3.from_key(heroku_api_key)
-        heroku_app = None
-        for app in heroku_conn.apps():
-            if app.name == os.getenv('HEROKU_APP_NAME', ''):
-                heroku_app = app
+        app = None
+        for heroku_app in heroku_conn.apps():
+            if "api_key_heroku" in heroku_app.config():
+                app = heroku_app
                 break
-        if heroku_app is None:
+        if app is None:
             await event.answer(
                 "`You seem to be running on Heroku "
                 "with an invalid environment. Couldn't update the app.`\n"
                 "`The changes will be reverted upon dyno restart.`"
             )
             await asyncio.sleep(2)
-            await updated_pip_modules(event, pull, repo, new_commit)
+            repo.__del__()
             await restart(event)
         else:
+            for build in app.builds():
+                if build.status == "pending":
+                    await event.answer(
+                        "`There seems to be an ongoing build in your app.`"
+                        " `Try again after it's finished.`"
+                    )
+                    return
             # Don't update the telethon environment varaibles
             userbot_config = client.config['userbot']
             app.config().update(dict(userbot_config))
@@ -196,25 +228,22 @@ async def updater(event: NewMessage.Event) -> None:
                     f"\n`{command}`"
                 )
                 LOGGER.exception(command)
+            repo.__del__()
     else:
-        await updated_pip_modules(event, pull, repo, new_commit)
+        repo.__del__()
         await restart(event)
 
 
-async def updated_pip_modules(event, pull, repo, new_commit):
-    pulled = getattr(pull, repo.active_branch.name, False)
-    if pulled and pulled.old_commit:
-        for f in new_commit.diff(pulled.old_commit):
-            if f.b_path == "requirements.txt":
-                await event.answer("`Updating the pip requirements!`")
-                await update_requirements()
-
-
 async def update_requirements():
-    reqs = os.path.join(basedir, "requirements.txt")
+    reqs = str(requirements_path)
     try:
-        await asyncio.create_subprocess_shell(
-            ' '.join(sys.executable, "-m", "pip", "install", "-r", str(reqs))
-        ).communicate()
+        process = await asyncio.create_subprocess_shell(
+            ' '.join([sys.executable, "-m", "pip", "install", "-r", reqs]),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+        return process.returncode
     except Exception as e:
         LOGGER.exception(e)
+        return repr(e)

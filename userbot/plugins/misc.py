@@ -19,17 +19,36 @@ import aiohttp
 import functools
 import io
 import PIL
+import re
 import requests
-from typing import BinaryIO
 
-from telethon.utils import get_extension
+from telethon import utils
+from telethon.tl import functions, types
 
 from userbot import client, LOGGER
-from userbot.utils.helpers import restart as shell_restart
+from userbot.helper_funcs import misc
+from userbot.helper_funcs.ids import get_entity_from_msg
+from userbot.utils.helpers import get_chat_link, restart
 from userbot.utils.events import NewMessage
 
 
 plugin_category = "misc"
+invite_links = {
+    'private': re.compile(r'^(?:https?://)?(t\.me/joinchat/\w+)/?$'),
+    'public': re.compile(r'^(?:https?://)?t\.me/(\w+)/?$'),
+    'username': re.compile(r'^@?(\w{5,32})$')
+}
+
+
+def removebg_post(API_KEY: str, media: bytes or str):
+    image_parameter = 'image_url' if isinstance(media, str) else 'image_file'
+    response = requests.post(
+        'https://api.remove.bg/v1.0/removebg',
+        files={image_parameter: media},
+        data={'size': 'auto'},
+        headers={'X-Api-Key': API_KEY},
+    )
+    return response
 
 
 @client.onMessage(
@@ -39,26 +58,23 @@ plugin_category = "misc"
 async def shutdown(event: NewMessage.Event) -> None:
     """Shutdown the userbot script."""
     await event.answer("`Disconnecting the client and exiting. Ciao!`")
+    client.reconnect = False
     print()
     LOGGER.info("Disconnecting the client and exiting the main script.")
-    await event.client.disconnect()
+    await client.disconnect()
 
 
 @client.onMessage(
     command=("restart", plugin_category),
-    outgoing=True, regex="restart(?: |$)(client)?$", builtin=True
+    outgoing=True, regex="restart$", builtin=True
 )
-async def restart(event: NewMessage.Event) -> None:
-    """Restart the userbot script or the client only if specified."""
-    arg = event.matches[0].group(1)
-    if arg:
-        event.client.loop.create_task(event.client._restarter(event))
-    else:
-        await event.answer(
-            "`BRB disconnecting and starting the script again!`",
-            log=("restart", "Restarted the userbot script")
-        )
-        await shell_restart(event)
+async def restarter(event: NewMessage.Event) -> None:
+    """Restart the userbot script."""
+    await event.answer(
+        "`BRB disconnecting and starting the script again!`",
+        log=("restart", "Restarted the userbot script")
+    )
+    await restart(event)
 
 
 @client.onMessage(
@@ -95,7 +111,7 @@ async def rmbg(event: NewMessage.Event) -> None:
                 return
         media = match
     elif reply and reply.media:
-        ext = get_extension(reply.media)
+        ext = utils.get_extension(reply.media)
         acceptable = [".jpg", ".png", ".bmp", ".tif", ".webp"]
         if ext not in acceptable:
             await event.answer("`Nice try, fool!`")
@@ -105,9 +121,12 @@ async def rmbg(event: NewMessage.Event) -> None:
         media = io.BytesIO()
         await client.download_media(reply, media)
         if ext in [".bmp", ".tif", ".webp"]:
-            media.seek(0)
             new_media = io.BytesIO()
-            pilImg = PIL.Image.open(media)
+            try:
+                pilImg = PIL.Image.open(media)
+            except OSError as e:
+                await event.answer(f'`OSError: {e}`')
+                return
             pilImg.save(new_media, format="PNG")
             pilImg.close()
             media.close()
@@ -117,15 +136,15 @@ async def rmbg(event: NewMessage.Event) -> None:
         return
 
     response = await client.loop.run_in_executor(
-        None, functools.partial(removebg_post, API_KEY, media)
+        None, functools.partial(removebg_post, API_KEY, media.getvalue())
     )
     if not isinstance(media, str):
         media.close()
-    if response.status_code == requests.codes.ok:
+    if response.status_code == 200:
         await event.delete()
         image = io.BytesIO(response.content)
         image.name = "image.png"
-        await event.respond(file=image, force_document=True)
+        await event.answer(file=image, force_document=True, reply=True)
         image.close()
     else:
         error = response.json()['errors'][0]
@@ -136,15 +155,109 @@ async def rmbg(event: NewMessage.Event) -> None:
         await event.answer(text)
 
 
-def removebg_post(API_KEY: str, media: BinaryIO or str):
-    image_parameter = 'image_url' if isinstance(media, str) else 'image_file'
-    if not isinstance(media, str):
-        media.seek(0)
+@client.onMessage(
+    command=("resolve", plugin_category),
+    outgoing=True, regex="resolve(?: |$)(.*)$"
+)
+async def resolver(event: NewMessage.Event) -> None:
+    """Resolve an invite link or a username."""
+    link = event.matches[0].group(1)
+    if not link:
+        await event.answer("`Resolved the void.`")
+        return
+    text = f"`Couldn't resolve:` {link}"
+    for link_type, pattern in invite_links.items():
+        match = pattern.match(link)
+        if match is not None:
+            valid = match.group(1)
+            if link_type == "private":
+                creatorid, cid, _ = utils.resolve_invite_link(valid)
+                if not cid:
+                    await event.answer(text)
+                    return
+                try:
+                    creator = await client.get_entity(creatorid)
+                    creator = await get_chat_link(creator)
+                except (TabError, ValueError):
+                    creator = f"`{creatorid}`"
+                text = f"**Link:** {link}"
+                text += f"\n**Link creator:** {creator}\n**ID:** `{cid}`"
+                try:
+                    chat = await client.get_entity(cid)
+                except (TypeError, ValueError):
+                    break
 
-    response = requests.post(
-        'https://api.remove.bg/v1.0/removebg',
-        files={image_parameter: media},
-        data={'size': 'auto'},
-        headers={'X-Api-Key': API_KEY},
-    )
-    return response
+                if isinstance(chat, types.Channel):
+                    result = await client(
+                        functions.channels.GetFullChannelRequest(
+                            channel=chat
+                        )
+                    )
+                    text += await misc.resolve_channel(event.client, result)
+                elif isinstance(chat, types.Chat):
+                    result = await client(
+                        functions.messages.GetFullChatRequest(
+                            chat_id=chat
+                        )
+                    )
+                    text += await misc.resolve_chat(event.client, result)
+                break
+            else:
+                try:
+                    chat = await client.get_entity(valid)
+                except (TypeError, ValueError):
+                    continue
+
+                if isinstance(chat, types.User):
+                    text = f"**ID:** `{chat.id}`"
+                    if chat.username:
+                        text += f"\n**Username:** @{chat.username}"
+                    text += f"\n{await get_chat_link(chat)}"
+
+                if isinstance(chat, types.ChatForbidden):
+                    text += f"\n`Not allowed to view {chat.title}.`"
+                elif isinstance(chat, types.ChatEmpty):
+                    text += "\n`The chat is empty.`"
+                elif isinstance(chat, types.Chat):
+                    text = f"**Chat:** @{valid}"
+                    result = await client(
+                        functions.messages.GetFullChatRequest(
+                            chat_id=chat
+                        )
+                    )
+                    text += await misc.resolve_chat(event.client, result)
+
+                if isinstance(chat, types.ChannelForbidden):
+                    text += f"\n`Not allowed to view {chat.title}.`"
+                elif isinstance(chat, types.Channel):
+                    text = f"**Channel:** @{valid}"
+                    result = await client(
+                        functions.channels.GetFullChannelRequest(
+                            channel=chat
+                        )
+                    )
+                    text += await misc.resolve_channel(event.client, result)
+    await event.answer(text, link_preview=False)
+
+
+@client.onMessage(
+    command=("mention", plugin_category),
+    outgoing=True, regex=r"mention(?: |$)(.*)$"
+)
+async def bot_mention(event: NewMessage.Event) -> None:
+    """Mention a user in the bot like link with a custom name."""
+    user, text, exception = await get_entity_from_msg(event)
+    if user and text:
+        if exception:
+            await event.answer(f"`Mention machine broke!\n{user}`")
+            return
+    else:
+        await event.answer("`Mentioned the void.`")
+        return
+
+    if not isinstance(user, types.User):
+        await event.answer("`Cannot mention non-users.`")
+        return
+
+    text = f"[{text}](tg://user?id={user.id})"
+    await event.answer(text)

@@ -32,7 +32,7 @@ plugin_category = "terminal"
     outgoing=True, regex=r"eval(?: |$)([\s\S]*)"
 )
 async def evaluate(event: NewMessage.Event) -> None:
-    """Evaluate something in the running script."""
+    """Evaluate Python expressions in the running script."""
     expression = event.matches[0].group(1).strip()
     reply = await event.get_reply_message()
     if not expression:
@@ -60,10 +60,10 @@ async def evaluate(event: NewMessage.Event) -> None:
 
 @client.onMessage(
     command=("exec", plugin_category),
-    outgoing=True, regex=r"exec(?: |$)([\s\S]*)"
+    outgoing=True, regex=r"exec(?: |$|\n)([\s\S]*)"
 )
 async def execute(event: NewMessage.Event) -> None:
-    """Execute Python code in a subprocess."""
+    """Execute Python statements in a subprocess."""
     message = (
         str(event.chat_id) +
         ':' +
@@ -116,7 +116,7 @@ async def execute(event: NewMessage.Event) -> None:
 
 @client.onMessage(
     command=("term", plugin_category),
-    outgoing=True, regex=r"term(?: |$)([\s\S]*)"
+    outgoing=True, regex=r"term(?: |$|\n)([\s\S]*)"
 )
 async def terminal(event: NewMessage.Event) -> None:
     """Execute terminal commands in a subprocess."""
@@ -173,7 +173,7 @@ async def terminal(event: NewMessage.Event) -> None:
 @client.onMessage(
     command=("kill/terminate", plugin_category),
     outgoing=True, regex=r"(kill|terminate)$",
-    info="Kill or Terminate a subprocess which is still running"
+    info="Kill or Terminate a subprocess which is still running."
 )
 async def killandterminate(event: NewMessage.Event) -> None:
     """Kill or terminate a running subprocess."""

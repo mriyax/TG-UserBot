@@ -16,9 +16,9 @@
 
 
 import concurrent
-import subprocess
 
 from userbot import client
+from userbot.utils.helpers import is_ffmpeg_there
 from userbot.helper_funcs.yt_dl import (
     extract_info, hook, list_formats, YTdlLogger
 )
@@ -55,17 +55,6 @@ params = {
     'quiet': True
 }
 
-try:
-    subprocess.Popen(
-        ['ffmpeg'],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT
-    ).communicate()
-    ffmpeg = True
-except OSError:
-    ffmpeg = False
-
 
 @client.onMessage(
     command="yt_dl",
@@ -75,6 +64,7 @@ async def yt_dl(event):
     """Download videos from YouTube with their url in multiple formats."""
     url = event.matches[0].group(1)
     fmt = event.matches[0].group(2)
+    ffmpeg = await is_ffmpeg_there()
 
     if fmt:
         fmt = fmt.strip()
@@ -115,7 +105,7 @@ async def yt_dl(event):
 
     await event.answer("`Processing...`")
     output = await extract_info(
-        concurrent.futures.ThreadPoolExecutor, params, url, download=True
+        concurrent.futures.ThreadPoolExecutor(), params, url, download=True
     )
     warning = (
         "`WARNING: FFMPEG is not installed!`"
