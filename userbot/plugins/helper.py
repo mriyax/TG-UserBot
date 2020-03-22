@@ -202,11 +202,11 @@ async def helper(event: NewMessage.Event) -> None:
         if arg == "all":
             text = "**Enabled commands:**"
             for name, command in sorted(enabled.items()):
-                text += f"\n**{name}**: `{command.info}`\n"
+                text += f"\n**{name}**: `{command.info}`"
             if disabled:
                 text += "\n**Disabled commands:**"
                 for name, command in sorted(disabled.items()):
-                    text += f"\n**{name}**: `{command.info}`\n"
+                    text += f"\n**{name}**: `{command.info}`"
         elif arg in [*enabled, *disabled]:
             merged = {**enabled, **disabled}
             command = merged.get(arg)
