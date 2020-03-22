@@ -22,7 +22,6 @@
 
 
 import asyncio
-import os
 import re
 
 from userbot import client
@@ -34,7 +33,7 @@ pattern = (
     r'(?:^|;.+?)'  # Ensure that the expression doesn't go blatant
     r'([1-9]+?)?'  # line: Don't match a 0, sed counts lines from 1
     r'(?:sed|s)'  # The s command (as in substitute)
-    r'(?:(?P<d>.))'  # Unknown delimiter with a named group d
+    r'(?:(?P<d>[^\n\\]))'  # Unknown delimiter with a named group d
     r'((?:(?!(?<![^\\]\\)(?P=d)).)+)'  # regexp
     r'(?P=d)'  # Unknown delimiter
     r'((?:(?!(?<![^\\]\\)(?P=d)|(?<![^\\]\\);).)*)'  # replacement
@@ -42,7 +41,7 @@ pattern = (
     r'((?<!;)\w+)?'  # flags: Don't capture if it starts with a semicolon
     r'(?=;|$)'  # Ensure it ends with a semicolon for the next match
 )
-ub_sed_pattern = r"^(?:[1-9]+sed|[1-9]+s|sed)"
+ub_sed_pattern = r"^(?:[1-9]+s(ed)?|sed)"
 
 
 @client.onMessage(
@@ -107,7 +106,7 @@ async def sed_substitute(event: NewMessage.Event) -> None:
 async def regex_ninja(event: NewMessage.Event) -> None:
     """Enable and disable ninja mode for @regexbot"""
     arg = event.matches[0].group(1)
-    ninja = os.environ.get("userbot_regexninja", False)
+    ninja = client.config['userbot'].getboolean('userbot_regexninja', False)
 
     if not arg:
         if ninja:
@@ -117,18 +116,18 @@ async def regex_ninja(event: NewMessage.Event) -> None:
         return
 
     if arg == "on":
-        os.environ["userbot_regexninja"] = "True"
+        client.config['userbot']['userbot_regexninja'] = True
         value = "enabled"
     else:
-        del os.environ["userbot_regexninja"]
+        client.config['userbot']['userbot_regexninja'] = False
         value = "disabled"
+    client._updateconfig()
 
     await event.answer(
         f"`Successfully {value} ninja mode for @regexbot!`",
+        self_destruct=2,
         log=("regexninja", f"{value.title()} ninja mode for @regexbot!")
     )
-    await asyncio.sleep(2)
-    await event.delete()
 
 
 @client.onMessage(
@@ -137,7 +136,7 @@ async def regex_ninja(event: NewMessage.Event) -> None:
 )
 async def ninja(event: NewMessage.Event) -> None:
     """Deletes our sed messages if regexninja is enabled"""
-    ninja = os.environ.get("userbot_regexninja", False)
+    ninja = client.config['userbot'].getboolean('userbot_regexninja', False)
     if ninja:
         await asyncio.sleep(0.5)
         await event.delete()

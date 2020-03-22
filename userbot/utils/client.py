@@ -20,8 +20,10 @@ import dataclasses
 import logging
 from typing import Dict, List
 
-from telethon import TelegramClient, events
+from telethon import events, TelegramClient
 
+from .FastTelethon import download_file, upload_file
+from .parser import parse_arguments
 from .pluginManager import PluginManager
 from .events import MessageEdited, NewMessage
 
@@ -55,7 +57,7 @@ class UserBotClient(TelegramClient):
     version: int = 0
 
     def onMessage(
-        self,
+        self: TelegramClient,
         builtin: bool = False,
         command: str or tuple = None,
         edited: bool = True,
@@ -75,12 +77,13 @@ class UserBotClient(TelegramClient):
             if self.register_commands and command:
                 handlers = events._get_handlers(func)
                 category = "misc"
-                com = command
                 if isinstance(command, tuple):
                     if len(command) == 2:
                         com, category = command
                     else:
                         raise ValueError
+                else:
+                    com = command
 
                 UBcommand = Command(
                     func,
@@ -90,7 +93,6 @@ class UserBotClient(TelegramClient):
                 )
                 category = category.lower()
                 self.commands.update({com: UBcommand})
-
                 update_dict(self.commandcategories, category, com)
                 if builtin:
                     update_dict(self.commandcategories, 'builtin', com)
@@ -107,8 +109,13 @@ class UserBotClient(TelegramClient):
     def _kill_running_processes(self) -> None:
         """Kill all the running asyncio subprocessess"""
         for _, process in self.running_processes.items():
-            process.kill()
-            LOGGER.debug("Killed %d which was still running.", process.pid)
+            try:
+                process.kill()
+                LOGGER.debug(
+                    "Killed %d which was still running.", process.pid
+                )
+            except Exception as e:
+                LOGGER.debug(e)
         self.running_processes.clear()
 
 
@@ -116,3 +123,8 @@ def update_dict(category: dict, name: str, command: str or list) -> None:
     commands = command.split('/') if '/' in command else [command]
     for c in commands:
         category.setdefault(name, []).append(c)
+
+
+UserBotClient.fast_download_file = download_file
+UserBotClient.fast_upload_file = upload_file
+UserBotClient.parse_arguments = parse_arguments

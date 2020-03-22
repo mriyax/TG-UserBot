@@ -194,13 +194,13 @@ async def updater(event: NewMessage.Event) -> None:
             userbot_config = client.config['userbot']
             app.config().update(dict(userbot_config))
             app.config().update({
-                'userbot_restarted': f"{event.chat_id}/{event.message.id}",
-                'userbot_update': "True"
+                "userbot_restarted": f"{event.chat_id}/{event.message.id}",
+                "userbot_update": "True"
             })
             if event.client.disabled_commands:
                 disabled_list = ", ".join(client.disabled_commands.keys())
                 app.config().update(
-                    {'userbot_disabled_commands': disabled_list}
+                    {"userbot_disabled_commands": disabled_list}
                 )
 
             url = f"https://api:{heroku_api_key}@git.heroku.com/{app.name}.git"

@@ -22,7 +22,8 @@ import logging
 import os
 import os.path
 import sys
-from typing import Union
+import time
+from typing import Tuple, Union
 
 from heroku3 import from_key
 
@@ -36,7 +37,7 @@ from .events import NewMessage
 from userbot.plugins import plugins_data
 
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger('userbot')
 sample_config_file = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
     'sample_config.ini'
@@ -46,8 +47,9 @@ sample_config_file = os.path.join(
 def printUser(entity: types.User) -> None:
     """Print the user's first name + last name upon start"""
     user = get_display_name(entity)
-    print(
-        "\nSuccessfully logged in as {0}{2}{1}".format(CUSR, CEND, user)
+    print()
+    LOGGER.warning(
+        "Successfully logged in as {0}{2}{1}".format(CUSR, CEND, user)
     )
 
 
@@ -55,10 +57,11 @@ def printVersion(version: int, prefix: str) -> None:
     """Print the version of the bot with the default prefix"""
     if not prefix:
         prefix = '.'
-    print(
+    LOGGER.warning(
         "{0}UserBot v{2}{1} is running, test it by sending {3}ping in"
-        " any chat.\n".format(CUSR, CEND, version, prefix)
+        " any chat.".format(CUSR, CEND, version, prefix)
     )
+    print()
 
 
 def resolve_env(config: configparser.ConfigParser):
@@ -89,6 +92,8 @@ def resolve_env(config: configparser.ConfigParser):
         config['telethon']['redis_password'] = redis_password
 
     userbot = {
+        'userbot_regexninja': bool(os.getenv('userbot_regexninja', None)),
+        'pm_permit': bool(os.getenv('pm_permit', None)),
         'console_logger_level': os.getenv('console_logger_level', None),
         'logger_group_id': os.getenv('logger_group_id', None),
         'userbot_prefix': os.getenv('userbot_prefix', None),
@@ -230,7 +235,7 @@ async def _human_friendly_timedelta(timedelta: str) -> str:
         delimiter = " and " if len(text) > 1 else ''
         text += f"{delimiter}{s} {unit}"
     if len(text) == 0:
-        text = "\u221E (less than 1 second)"
+        text = "\u221E"
     return text
 
 
@@ -244,7 +249,11 @@ async def get_chat_link(
         entity = await arg.get_chat()
 
     if isinstance(entity, types.User):
-        extra = f"[{get_display_name(entity)}](tg://user?id={entity.id})"
+        if entity.is_self:
+            name = "yourself"
+        else:
+            name = get_display_name(entity) or "Deleted Account?"
+        extra = f"[{name}](tg://user?id={entity.id})"
     else:
         if hasattr(entity, 'username') and entity.username is not None:
             username = '@' + entity.username
@@ -259,7 +268,9 @@ async def get_chat_link(
         else:
             if isinstance(username, int):
                 username = f"`{username}`"
-            extra = f"{entity.title} ( {username} )"
+                extra = f"{entity.title} ( {username} )"
+            else:
+                extra = f"[{entity.title}](tg://resolve?domain={username})"
     return extra
 
 
@@ -269,7 +280,7 @@ async def disable_commands(client: UserBotClient, commands: str) -> None:
         target = client.commands.get(command, False)
         if target:
             client.remove_event_handler(target.func)
-            client.disabled_commands.update({command: target})
+            client.disabled_commands.update(command=target)
             del client.commands[command]
             LOGGER.debug("Disabled command: %s", command)
 
@@ -282,3 +293,121 @@ async def is_ffmpeg_there():
     )
     await cmd.communicate()
     return True if cmd.returncode == 0 else False
+
+
+async def format_speed(speed_per_second, unit):
+    unit0 = unit[0].lower()
+    base, unit0 = (1024, "Byte") if unit[0] == 'byte' else (1000, "bit")
+    seq = ['', 'K', 'M', 'G']
+    speed = speed_per_second / unit[1]
+    for i in seq:
+        if speed/base < 1:
+            return speed, i, unit0
+        speed /= base
+
+
+async def calc_eta(elp: float, speed: int, current: int, total: int) -> int:
+    if total is None or total == 0:
+        return 0
+    if current == 0 or elp < 0.001:
+        return 0
+    speed = speed if speed else 1
+    return int((float(total) - float(current)) / speed)
+
+
+def ul_progress(d: dict, event) -> Tuple[Union[str, bool], bool]:
+    """ Logs the upload progress """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    log_text = (
+        "Uploaded %(current)s of %(total)s. "
+        "Progress: %(percentage)s%% speed: %(speed)s"
+        "Time elapsed: %(elp)s"
+    )
+    LOGGER.debug(log_text % d)
+    text = (
+        "`Uploading %(filen)s at %(speed)s.`\n"
+        "__Progress: %(percentage)s%% of %(total)s__\n"
+        "__ETA: %(eta)s, Elapsed: %(elp)s__"
+    )
+
+    if d.get('percentage', 0) == 100:
+        return "__Successfully uploaded %(filen)s in %(elp)s!__" % d, True
+    elif (now - event.date).total_seconds() > 5:
+        return text % d, False
+    return False, False
+
+
+def dl_progress(d: dict, event) -> Tuple[Union[str, bool], bool]:
+    """ Logs the download progress """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    log_text = (
+        "Downloaded %(current)s of %(total)s. "
+        "Progress: %(percentage)s%%"
+        "Time elapsed: %(elp)s"
+    )
+    LOGGER.debug(log_text % d)
+    text = (
+        "`Downloading %(filen)s at %(speed)s.`\n"
+        "__Progress: %(percentage)s%% of %(total)s__\n"
+        "__ETA: %(eta)s, Elapsed: %(elp)s__"
+    )
+
+    if d.get('percentage', 0) == 100:
+        return "__Successfully downloaded %(filen)s in %(elp)s!__" % d, True
+    elif (now - event.date).total_seconds() > 5:
+        return text % d, False
+    return False, False
+
+
+class ProgressCallback():
+    """Custom class to handle upload and download progress."""
+    def __init__(self, event, start=None, filen='unamed'):
+        self.event = event
+        self.start = start or time.time()
+        self.last_edit = None
+        self.filen = filen
+        self.upload_finished = False
+        self.download_finished = False
+
+    async def resolve_prog(self, current, total):
+        """Calculate the necessary info and make a dict from it."""
+        if not self.last_edit:
+            self.last_edit = datetime.datetime.now(datetime.timezone.utc)
+        now = time.time()
+        elp = now - self.start
+        speed = int(float(current) / elp)
+        eta = await calc_eta(elp, speed, current, total)
+        s0, s1, s2 = await format_speed(speed, ("byte", 1))
+        c0, c1, c2 = await format_speed(current, ("byte", 1))
+        t0, t1, t2 = await format_speed(total, ("byte", 1))
+        percentage = round(current / total * 100, 2)
+        return {
+            'filen': self.filen, 'percentage': percentage,
+            'eta': await _humanfriendly_seconds(eta),
+            'elp': await _humanfriendly_seconds(elp),
+            'current': f'{c0:.2f}{c1}{c2[0]}',
+            'total': f'{t0:.2f}{t1}{t2[0]}',
+            'speed': f'{s0:.2f}{s1}{s2[0]}/s'
+        }
+
+    async def up_progress(self, current, total):
+        """Handle the upload progress only."""
+        d = await self.resolve_prog(current, total)
+        edit, finished = ul_progress(d, self.event)
+        if finished:
+            if not self.upload_finished:
+                self.event = await self.event.answer(edit)
+                self.upload_finished = True
+        elif edit:
+            self.event = await self.event.answer(edit)
+
+    async def dl_progress(self, current, total):
+        """Handle the download progress only."""
+        d = await self.resolve_prog(current, total)
+        edit, finished = dl_progress(d, self.event)
+        if finished:
+            if not self.download_finished:
+                self.event = await self.event.answer(edit)
+                self.download_finished = True
+        elif edit:
+            self.event = await self.event.answer(edit)

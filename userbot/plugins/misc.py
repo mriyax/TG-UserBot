@@ -17,6 +17,7 @@
 
 import aiohttp
 import functools
+import git
 import io
 import PIL
 import re
@@ -27,7 +28,6 @@ from telethon.tl import functions, types
 
 from userbot import client, LOGGER
 from userbot.helper_funcs import misc
-from userbot.helper_funcs.ids import get_entity_from_msg
 from userbot.utils.helpers import get_chat_link, restart
 from userbot.utils.events import NewMessage
 
@@ -38,6 +38,8 @@ invite_links = {
     'public': re.compile(r'^(?:https?://)?t\.me/(\w+)/?$'),
     'username': re.compile(r'^@?(\w{5,32})$')
 }
+usernexp = re.compile(r'@(\w{3,32})\[(.+?)\]')
+nameexp = re.compile(r'\[([\w\S]+)\]\(tg://user\?id=(\d+)\)\[(.+?)\]')
 
 
 def removebg_post(API_KEY: str, media: bytes or str):
@@ -162,13 +164,14 @@ async def rmbg(event: NewMessage.Event) -> None:
 async def resolver(event: NewMessage.Event) -> None:
     """Resolve an invite link or a username."""
     link = event.matches[0].group(1)
+    chat = None
     if not link:
         await event.answer("`Resolved the void.`")
         return
     text = f"`Couldn't resolve:` {link}"
     for link_type, pattern in invite_links.items():
         match = pattern.match(link)
-        if match is not None:
+        if match:
             valid = match.group(1)
             if link_type == "private":
                 creatorid, cid, _ = utils.resolve_invite_link(valid)
@@ -178,13 +181,16 @@ async def resolver(event: NewMessage.Event) -> None:
                 try:
                     creator = await client.get_entity(creatorid)
                     creator = await get_chat_link(creator)
-                except (TabError, ValueError):
+                except (TypeError, ValueError):
                     creator = f"`{creatorid}`"
                 text = f"**Link:** {link}"
                 text += f"\n**Link creator:** {creator}\n**ID:** `{cid}`"
                 try:
                     chat = await client.get_entity(cid)
                 except (TypeError, ValueError):
+                    break
+                except Exception as e:
+                    text += f"\n```{e}```"
                     break
 
                 if isinstance(chat, types.Channel):
@@ -241,23 +247,39 @@ async def resolver(event: NewMessage.Event) -> None:
 
 
 @client.onMessage(
-    command=("mention", plugin_category),
-    outgoing=True, regex=r"mention(?: |$)(.*)$"
+    command=("mention", plugin_category), outgoing=True
 )
 async def bot_mention(event: NewMessage.Event) -> None:
     """Mention a user in the bot like link with a custom name."""
-    user, text, exception = await get_entity_from_msg(event)
-    if user and text:
-        if exception:
-            await event.answer(f"`Mention machine broke!\n{user}`")
-            return
-    else:
-        await event.answer("`Mentioned the void.`")
-        return
+    newstr = event.text
+    if event.entities:
+        newstr = nameexp.sub(r'<a href="tg://user?id=\2">\3</a>', newstr, 0)
+        for match in usernexp.finditer(newstr):
+            user = match.group(1)
+            text = match.group(2)
+            newstr = re.sub(
+                re.escape(match.group(0)),
+                f'<a href="tg://resolve?domain={user}">{text}</a>',
+                newstr
+            )
+    if newstr != event.text:
+        await event.answer(newstr, parse_mode='html')
 
-    if not isinstance(user, types.User):
-        await event.answer("`Cannot mention non-users.`")
-        return
 
-    text = f"[{text}](tg://user?id={user.id})"
-    await event.answer(text)
+@client.onMessage(
+    command=("repo", plugin_category),
+    outgoing=True, regex="repo$"
+)
+async def git_repo(event: NewMessage.Event) -> None:
+    """Get the repo url."""
+    try:
+        repo = git.Repo('.')
+        remote_url = repo.remote().url.replace(".git", '/')
+        if remote_url[-1] != '/':
+            remote_url = remote_url + '/'
+        repo.__del__()
+    except Exception as e:
+        LOGGER.info("Couldnt fetch the repo link.")
+        LOGGER.debug(e)
+        remote_url = "https://github.com/kandnub/TG-UserBot/"
+    await event.answer(f"[TG-UserBot]({remote_url})")
